@@ -33,7 +33,7 @@ public with sharing class ProductsController {
   }
 
   // Write a method called populateOwnedProductSet that takes in an accountId and uses the getProductsByAccountId method and generates two sets for hasProduct and hadProduct
-  public static Set<String> populateOwnedProductSet(Id accountId) {
+  public static void populateOwnedProductSet(Id accountId) {
     for (
       FCSA_Product__c product : getProductsByAccountId(new Set<Id>{ accountId })
     ) {
@@ -44,10 +44,8 @@ public with sharing class ProductsController {
         hadProduct.add(product.CustomerProductType_ID__c);
       }
     }
-
-    return hasProduct;
   }
-
+	
   // Write a method called assignProductOwnedHistory that takes in a list of ProductOwned__mdt and assigns the Owned_History__c field based on the hasProduct and hadProduct sets
   public static void assignProductOwnedHistory(
     List<ProductOwned__mdt> products
@@ -84,6 +82,61 @@ public with sharing class ProductsController {
     }
 
     return productsByCategory;
+  }
+
+  // Create a method called getSortedProductsBySortedCategory that takes in a map of String to list of ProductOwned__mdt and generate a sorted list of ProductSortWrapper
+  // and use the sorted list of ProductSortWrapper to generate a list of CategorizedProductWrapper using (ProductOwned__mdt.Product_Owned_Category__r.Category_Order__c - 1) 
+  // as an index for a list of CategorizedProductWrapper and create a CategorizedProductWrapper with the productCategory and a sublist of ProductSortWrapper
+  public static List<CategorizedProductWrapper> getSortedProductsBySortedCategory(
+    Map<String, List<ProductOwned__mdt>> productsByCategory
+  ) {
+    List<CategorizedProductWrapper> sortedProductsByCategory = new List<CategorizedProductWrapper>();
+
+    List<ProductSortWrapper> sortedProducts = new List<ProductSortWrapper>();
+
+    for (String category : productsByCategory.keySet()) {
+      sortedProducts.addAll(
+        new List<ProductSortWrapper>(productsByCategory.get(category))
+      );
+    }
+
+    sortedProducts.sort();
+
+    for (ProductSortWrapper product : sortedProducts) {
+      Integer categoryIndex = product.product.Product_Owned_Category__r
+        .Category_Order__c - 1;
+
+      if (sortedProductsByCategory.size() <= categoryIndex) {
+        sortedProductsByCategory.add(
+          new CategorizedProductWrapper(
+            product.product.Product_Owned_Category__r.Category_Name__c,
+            new List<ProductOwned__mdt>()
+          )
+        );
+      }
+
+      sortedProductsByCategory.get(categoryIndex).products.add(
+        product.product
+      );
+    }
+
+    return sortedProductsByCategory;
+  }
+  
+
+
+  // Create an inner class called CategorizedProductWrapper that contains a string called productCategory and a list of ProductOwned__mdt called products
+  public class CategorizedProductWrapper {
+    public String productCategory;
+    public List<ProductOwned__mdt> products;
+
+    public CategorizedProductWrapper(
+      String productCategory,
+      List<ProductOwned__mdt> products
+    ) {
+      this.productCategory = productCategory;
+      this.products = products;
+    }
   }
 
 	// Create an inner class called ProductSortWrapper that implements Comparable to compare two ProductOwned__mdt records using the SalesforceName__c field
@@ -143,10 +196,17 @@ public with sharing class ProductsController {
 		return products;
 	}
 
-	// Create a method called getProducts that takes in an accountId and returns a list of ProductSortWrapper
-	public static List<ProductSortWrapper> getProducts(Id accountId) {
-		List<ProductOwned__mdt>
-	}
+  // Create a cacheable method called getAllProducts that takes in an accountId, passes it into the populateOwnedProductSet method
+  // assigns a list of ProductOwned__mdt by calling the getProductsOwned method, and using that list calls the assignProductOwnedHistory method
+  // then seraliazes the map returned by assignProductOwnedHistory and returns it as a string
+  @AuraEnabled(cacheable=true)
+  public static String getAllProducts(Id accountId) {
+    populateOwnedProductSet(accountId);
 
+    List<ProductOwned__mdt> products = getProductsOwned();
 
+    assignProductOwnedHistory(products);
+
+    return JSON.serialize(createProductsByCategoryMap(products));
+  } 
 }
